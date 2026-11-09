@@ -65,6 +65,24 @@ fn recent_groups<'a>(lines: impl DoubleEndedIterator<Item = &'a ChatLine>, resid
     out
 }
 
+/// Groups a slice of reading-order lines again, once the wrapped-text budget
+/// took the oldest ones: a cut may leave the newer lines of a card without
+/// its head, which becomes a head of its own.
+fn regroup<'a>(lines: &[&'a ChatLine]) -> Vec<Vec<&'a ChatLine>> {
+    let mut out: Vec<Vec<&ChatLine>> = Vec::new();
+    for &line in lines {
+        if let Some(group) = out.last_mut()
+            && same_sender(group[group.len() - 1], line)
+            && group.len() < 6
+        {
+            group.push(line);
+            continue;
+        }
+        out.push(vec![line]);
+    }
+    out
+}
+
 /// Two lines under one head: the same resident or object, said in a row
 /// at the same volume (the SHOUTS / WHISPERS tag is the head's, #1323);
 /// notices stand alone.
@@ -164,12 +182,53 @@ pub(super) fn cards(
     residents: bool,
     now: std::time::SystemTime,
 ) {
-    let recent = recent_groups(world.chat.iter(), residents);
-    if !recent
+    let groups = recent_groups(world.chat.iter(), residents);
+    if !groups
         .iter()
         .flatten()
         .any(|line| now.duration_since(line.time).map(|d| d.as_secs_f32() < seconds).unwrap_or(false))
     {
+        return;
+    }
+    // Keep the Legacy Viewer's wrapped-text budget (LLConsole::draw) while the
+    // cards keep their slot as they fade: a fully faded line costs nothing,
+    // and the first visible line that no longer fits takes itself and
+    // everything older with it.
+    let mut remaining = max_lines as usize;
+    let mut cut = 0;
+    let flat: Vec<&ChatLine> = groups.iter().flatten().copied().collect();
+    for (index, line) in flat.iter().enumerate().rev() {
+        if alpha(seconds, line, now) <= 0.0 {
+            continue;
+        }
+        let small = super::object_row::compact(line, compact_automated);
+        let (width, size, look) = if small {
+            let painter = ctx.layer_painter(egui::LayerId::background());
+            let time_w = if times {
+                super::object_row::time_galley(&painter, p, line).size().x + 5.0
+            } else {
+                0.0
+            };
+            let size = chat_size(ctx, super::object_row::TEXT);
+            let lead = time_w + if line.kind.is_notice() { super::pic_side(size) + 2.0 } else { 0.0 };
+            (WIDTH - 18.0 - lead, size, JobLook::Compact)
+        } else {
+            let width = WIDTH - 18.0 - if line.kind.is_notice() { 0.0 } else { PICTURE + GAP };
+            (width, chat_size(ctx, TEXT), JobLook::Body)
+        };
+        let count = rows(ctx, line, line_job(ctx, line, p, world, want_names, width, size, false, look)).max(1);
+        if count > remaining {
+            cut = index + 1;
+            break;
+        }
+        remaining -= count;
+        if remaining == 0 {
+            cut = index;
+            break;
+        }
+    }
+    let kept = regroup(&flat[cut..]);
+    if kept.is_empty() {
         return;
     }
     let mut links: Vec<(egui::Rect, Link, Color32)> = Vec::new();
@@ -184,7 +243,7 @@ pub(super) fn cards(
         .show(ctx, |ui| {
             ui.set_max_width(WIDTH);
             ui.spacing_mut().item_spacing.y = 0.0;
-            for group in &recent {
+            for group in &kept {
                 let card_alpha = group.iter().map(|l| alpha(seconds, l, now)).fold(0.0_f32, f32::max);
                 let tint = Color32::from_rgba_unmultiplied(p.bar.r(), p.bar.g(), p.bar.b(), (190.0 * card_alpha) as u8);
                 let radius = ui.visuals().window_corner_radius;
@@ -592,8 +651,9 @@ mod tests {
                     let limit = wrapped as u32 + 1;
                     let within = draw(limit);
                     assert_eq!(within.len(), 2, "{case}: {within:?}");
-                    assert!(within[0].0.contains("console-wrapped"), "{case}: {within:?}");
-                    assert!(within[1].0.contains("console-newest"), "{case}: {within:?}");
+                    assert!(within.iter().any(|(text, _)| text.contains("console-wrapped")), "{case}: {within:?}");
+                    assert!(within.iter().any(|(text, _)| text.contains("console-newest")), "{case}: {within:?}");
+                    assert!(!within.iter().any(|(text, _)| text.contains("console-oldest")), "{case}: {within:?}");
                     assert_eq!(within.iter().map(|(_, rows)| rows).sum::<usize>(), limit as usize, "{case}");
                     let newest = draw(limit - 1);
                     assert_eq!(newest.len(), 1, "{case}: {newest:?}");
@@ -690,6 +750,7 @@ mod tests {
                         &mut HashSet::new(),
                         740.0,
                         20.0,
+                        u32::MAX,
                         false,
                         false,
                         true,
@@ -779,6 +840,7 @@ mod tests {
                         &mut HashSet::new(),
                         740.0,
                         20.0,
+                        u32::MAX,
                         false,
                         false,
                         true,

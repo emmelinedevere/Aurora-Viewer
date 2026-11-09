@@ -3649,6 +3649,7 @@ pub fn toasts(
         wanted_pics,
         bottom,
         seconds,
+        max_lines,
         times,
         pills,
         cards,
@@ -3668,6 +3669,7 @@ fn toasts_at(
     wanted_pics: &mut HashSet<uuid::Uuid>,
     bottom: f32,
     seconds: f32,
+    max_lines: u32,
     times: bool,
     pills: bool,
     cards: bool,
@@ -3706,6 +3708,41 @@ fn toasts_at(
     {
         return;
     }
+    let (size, margin, gap) = if pills {
+        (super::fonts::chat_size(ctx, 12.0), egui::Margin::symmetric(9, 4), 4.0)
+    } else {
+        (super::fonts::chat_size(ctx, 13.0), egui::Margin::symmetric(6, 2), 2.0)
+    };
+    let family = pills.then(|| super::fonts::semibold(ctx));
+    // Keep the wrapped-text budget (LLConsole::draw) on the visible lines; a
+    // fully faded toast still holds its slot and costs nothing.
+    let mut remaining = max_lines as usize;
+    let mut cut = recent.len();
+    for (index, line) in recent.iter().enumerate() {
+        let age = now.duration_since(line.time).map(|d| d.as_secs_f32()).unwrap_or(0.0);
+        if ((seconds - age) / 3.0).clamp(0.0, 1.0) <= 0.0 {
+            continue;
+        }
+        let count = console::rows(
+            ctx,
+            line,
+            line_job(ctx, line, p, world, want_names, 540.0, size, times, family.as_ref().map_or(JobLook::Line, JobLook::Pill)),
+        )
+        .max(1);
+        if count > remaining {
+            cut = index;
+            break;
+        }
+        remaining -= count;
+        if remaining == 0 {
+            cut = index + 1;
+            break;
+        }
+    }
+    let recent = &recent[..cut];
+    if recent.is_empty() {
+        return;
+    }
     let line_count = recent.len();
     let mut links: Vec<(egui::Rect, Link, Color32)> = Vec::new();
     let mut names: Vec<(egui::Rect, &crate::world::ChatLine)> = Vec::new();
@@ -3721,12 +3758,6 @@ fn toasts_at(
             ui.set_max_width(560.0);
             // the islands' pills: the mockup's 12 px text, 9 × 4 margins and
             // 4 px between two lines
-            let (size, margin, gap) = if pills {
-                (super::fonts::chat_size(ui.ctx(), 12.0), egui::Margin::symmetric(9, 4), 4.0)
-            } else {
-                (super::fonts::chat_size(ui.ctx(), 13.0), egui::Margin::symmetric(6, 2), 2.0)
-            };
-            let family = pills.then(|| super::fonts::semibold(ui.ctx()));
             if pills {
                 ui.spacing_mut().item_spacing.y = 0.0;
             }
@@ -4266,6 +4297,7 @@ mod tests {
                         &mut HashSet::new(),
                         740.0,
                         20.0,
+                        u32::MAX,
                         false,
                         false,
                         false,
