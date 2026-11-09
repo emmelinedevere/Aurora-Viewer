@@ -79,6 +79,10 @@ pub mod conference;
 /// The Conversations button flashing (AURORA_DEMO_CONV_BUTTON).
 #[path = "demo_conv_button.rs"]
 pub mod conv_button;
+/// A blended face lying exactly on an opaque face of the same mesh
+/// (AURORA_DEMO_COPLANAR_DECAL).
+#[path = "demo_coplanar_decal.rs"]
+pub mod coplanar_decal;
 /// A worn layer lying exactly on the skin, in strips
 /// (AURORA_DEMO_COPLANAR_LAYERS).
 #[path = "demo_coplanar_layers.rs"]
@@ -8674,6 +8678,9 @@ pub fn local_texture(id: &Uuid) -> Option<(Vec<u8>, u32, u32)> {
     if let Some(texture) = alpha_mask_ab::texture(id) {
         return Some(texture);
     }
+    if let Some(texture) = coplanar_decal::texture(id) {
+        return Some(texture);
+    }
     if let Some(pixels) = texture_library::texture(id) {
         return Some(pixels);
     }
@@ -9362,5 +9369,41 @@ mod particle_tests {
                 assert!(parts.iter().any(|p| p.vel.z > 0.1));
             }
         }
+    }
+}
+
+/// AURORA_DEMO_TERRAIN_CROSSING=1: retain the viewpoint while changing
+/// the render origin twice, so terrain continuity can be compared directly.
+pub fn terrain_crossing_step(world: &mut crate::world::World, frame: u64) {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ENABLED.get_or_init(|| std::env::var_os("AURORA_DEMO_TERRAIN_CROSSING").is_some()) {
+        return;
+    }
+    let neighbour = HANDLE + (256_u64 << 32);
+    if frame == 60 {
+        let Some(region) = world.regions.get(&HANDLE) else { return };
+        let Some(info) = &region.info else { return };
+        let mut info = (**info).clone();
+        let heightmap = region.heightmap.clone();
+        info.handle = neighbour;
+        info.is_main = false;
+        info.name = "Aurora Demo Neighbour".into();
+        info.region_id = Uuid::from_u128(0xded00000_0000_0000_0000_000000002335);
+        world.apply(NetEvent::RegionHandshake(Arc::new(info)));
+        if let Some(region) = world.regions.get_mut(&neighbour) {
+            region.heightmap = heightmap;
+            region.dirty_chunks.extend(0..region.heightmap.chunk_count());
+        }
+    }
+    if matches!(frame, 600 | 900) {
+        let handle = if frame == 600 { neighbour } else { HANDLE };
+        let Some(offset) = world.region_offset(handle) else { return };
+        let position = world.agent.position - offset;
+        world.apply(NetEvent::AgentMovementComplete {
+            handle,
+            position,
+            look_at: Vec3::X,
+        });
+        log::info!("terrain crossing demo: render origin changed at frame {frame}, viewpoint retained");
     }
 }
