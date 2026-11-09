@@ -208,11 +208,19 @@ pub(super) fn show(
                             if st.delete_ignore == Some(true) {
                                 prefs.confirm_delete = false;
                             }
+                            super::delete::select_next(inv, st, ids);
                             actions.push(InvAction::Edit(change));
                             done = true;
                         }
                         Err(reason) => st.message = reason,
                     }
+                }
+                // `delete-confirm` demo: the confirm button closes the row of
+                // buttons on the right (120 × 28, `confirmation_buttons`)
+                if super::delete::demo_enabled() {
+                    let row = ui.min_rect();
+                    let confirm = egui::pos2(row.right() - 60.0, row.bottom() - 14.0);
+                    ctx.data_mut(|data| data.insert_temp(egui::Id::unique(("inventory_delete_confirm", st.ui_id)), confirm));
                 }
             }
             EditDialog::Empty(id) => {

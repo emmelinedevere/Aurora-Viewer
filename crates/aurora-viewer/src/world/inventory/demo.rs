@@ -516,6 +516,7 @@ pub fn target(view: &str, inv: &Inventory) -> Option<Uuid> {
         | "clipboard-copy"
         | "clipboard-cut"
         | "clipboard-folder"
+        | "delete-confirm"
         | "clipboard-cut-folder"
         | "clipboard-progress"
         | "clipboard-window"

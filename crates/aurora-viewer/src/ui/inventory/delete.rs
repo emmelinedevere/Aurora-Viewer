@@ -54,7 +54,10 @@ pub(super) fn open(
         return;
     }
     match plan(inv, &ids, false, prefs, facts) {
-        Ok(change) => actions.push(InvAction::Edit(change)),
+        Ok(change) => {
+            select_next(inv, st, &ids);
+            actions.push(InvAction::Edit(change));
+        }
         Err(reason) => st.message = reason,
     }
 }
@@ -181,20 +184,64 @@ pub fn demo_events(ctx: &egui::Context, frame: u64, st: &InventoryUi) -> Vec<egu
         650 | 651 => {
             ctx.data(|data| data.get_temp::<egui::Pos2>(egui::Id::unique(("clipboard_demo_row", st.ui_id, Uuid::from_u128(8001)))))
         }
-        680 | 681 if mode == "delete-button" => ctx
+        680 | 681 if matches!(mode, "delete-button" | "delete-confirm") => ctx
             .data(|data| data.get_temp::<egui::Rect>(egui::Id::unique(("inventory_delete_button", st.ui_id))))
             .map(|rect| rect.center()),
+        // `delete-confirm`: the trash button at 680, then the confirmation's Delete button
+        740 | 741 if mode == "delete-confirm" => {
+            ctx.data(|data| data.get_temp::<egui::Pos2>(egui::Id::unique(("inventory_delete_confirm", st.ui_id))))
+        }
         _ => None,
     };
+    if mode == "delete-confirm" && matches!(frame, 720 | 780) {
+        log::info!(
+            "demo inventory delete-confirm: frame={frame}, dialog_open={}, selected={:?}",
+            st.dialog.is_some(),
+            st.selected.map(|id| id.as_u128())
+        );
+    }
     pos.map_or_else(Vec::new, |pos| {
         vec![
             egui::Event::PointerMoved(pos),
             egui::Event::PointerButton {
                 pos,
                 button: egui::PointerButton::Primary,
-                pressed: matches!(frame, 650 | 680),
+                pressed: matches!(frame, 650 | 680 | 740),
                 modifiers: Default::default(),
             },
         ]
     })
+}
+
+/// LLFolderView::removeSelectedItems and getNextUnselectedItem
+/// (indra/llui/llfolderview.cpp, originally LGPL 2.1): a confirmed deletion
+/// selects the row below the last one removed, or above it at the end of the
+/// list, so that the next Delete goes on down the list.
+pub(super) fn select_next(inv: &Inventory, st: &mut InventoryUi, ids: &[Uuid]) {
+    let gone: std::collections::HashSet<Uuid> = ids.iter().copied().collect();
+    let order = super::keyboard::shown_order(st);
+    let last = st
+        .selected
+        .filter(|id| gone.contains(id))
+        .or_else(|| order.iter().rev().find(|row| gone.contains(row)).copied());
+    let next = last.and_then(|last| next_row(inv, order, &gone, last));
+    st.selection.clear();
+    st.selection.extend(next);
+    st.anchor = next;
+    st.selected = next;
+    st.keyboard_selection = true;
+}
+
+/// The first displayed row after `last` that does not go with the deletion,
+/// else the nearest one before it. Unlike getNextOpenNode, which skips only
+/// the selected rows going down, a row inside any deleted folder is skipped
+/// both ways: it leaves with its folder.
+pub(super) fn next_row(inv: &Inventory, order: &[Uuid], gone: &std::collections::HashSet<Uuid>, last: Uuid) -> Option<Uuid> {
+    let index = order.iter().position(|row| *row == last)?;
+    let stays = |row: &&Uuid| !rules::ancestors(inv, **row).any(|id| gone.contains(&id));
+    order[index + 1..]
+        .iter()
+        .find(stays)
+        .or_else(|| order[..index].iter().rev().find(stays))
+        .copied()
 }
