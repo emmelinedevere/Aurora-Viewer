@@ -2133,7 +2133,7 @@ mod tests {
                     &Icons::default(),
                     inv,
                     st,
-                    &InventoryPreferences::default(),
+                    &mut InventoryPreferences::default(),
                     &Facts::default(),
                     &Default::default(),
                     &mut actions,
