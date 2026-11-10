@@ -76,6 +76,9 @@ pub mod collisions;
 /// (AURORA_DEMO_CONFERENCE).
 #[path = "demo_conference.rs"]
 pub mod conference;
+/// Place details of place links (AURORA_DEMO_PLACE).
+#[path = "demo_contact_markers.rs"]
+pub mod contact_markers;
 /// The Conversations button flashing (AURORA_DEMO_CONV_BUTTON).
 #[path = "demo_conv_button.rs"]
 pub mod conv_button;
@@ -190,7 +193,6 @@ pub mod object_snap;
 /// region that puts part of it back by itself.
 #[path = "demo_outfit_restore.rs"]
 pub mod outfit_restore;
-/// Place details of place links (AURORA_DEMO_PLACE).
 #[path = "demo_people.rs"]
 pub mod people;
 /// Avatar body physics: a physics layer and balls on the body (AURORA_DEMO_PHYSICS).
@@ -1112,8 +1114,14 @@ pub fn gifs_scenario() -> Option<Gifs> {
     })
 }
 
-/// AURORA_DEMO_RECENT_EMOJIS=1|<emojis>: the row under the chat fields, the
-/// given emojis or a full row; unset, it starts empty as a new account's.
+/// Whether `AURORA_DEMO_RECENT_EMOJIS` is set: the row is shown then.
+pub fn recent_emojis_on() -> bool {
+    std::env::var_os("AURORA_DEMO_RECENT_EMOJIS").is_some()
+}
+
+/// AURORA_DEMO_RECENT_EMOJIS=1|<emojis>: the row by the chat fields, the
+/// given emojis or a full row, shown even though Preferences › Chat keeps it
+/// off by default; unset, it starts empty as a new account's.
 pub fn recent_emojis() -> String {
     match std::env::var("AURORA_DEMO_RECENT_EMOJIS") {
         Ok(v) if v.trim() == "1" => "🌟🐱🍕🎶🌈☕🤔😎🥳😍👏😢🙏🎉😅🔥👍❤😭😂".to_owned(),
@@ -1630,6 +1638,9 @@ pub struct AuroraScene {
     pub away: bool,
     /// `new`: the menu of the column's "new conversation" button open.
     pub new_menu: bool,
+    /// The column collapsed at any width, or opened in a narrow window.
+    pub collapsed: bool,
+    pub opened: bool,
     /// `volume`: the menu of the nearby chat's volume open.
     pub volume_menu: bool,
     /// `channel`: the nearby chat's channel selector shown.
@@ -1675,6 +1686,8 @@ fn parse_aurora_scene(v: &str) -> Option<AuroraScene> {
         call: None,
         away: false,
         new_menu: false,
+        collapsed: false,
+        opened: false,
         volume_menu: false,
         channel: false,
         friend: None,
@@ -1698,6 +1711,8 @@ fn parse_aurora_scene(v: &str) -> Option<AuroraScene> {
             "call-p2p" => scene.call = Some(AuroraCall::P2p),
             "conference" => scene.call = Some(AuroraCall::Conference),
             "new" => scene.new_menu = true,
+            "collapsed" => scene.collapsed = true,
+            "opened" => scene.opened = true,
             "volume" => scene.volume_menu = true,
             "channel" => scene.channel = true,
             "friend-away" => scene.friend = Some(crate::ui::presence::Status::Away),
