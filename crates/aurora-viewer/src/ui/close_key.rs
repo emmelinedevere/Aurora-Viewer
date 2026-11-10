@@ -18,8 +18,9 @@
 //! All still closes that window. Script prompts are windows of their own
 //! while they show as toasts: Close Window takes the newest before the
 //! windows behind it ([`shown_prompt`]); kept in the notification list,
-//! Close All still closes them ([`shown_extra`]). The mini-map has no title
-//! bar, so it is not in the frontmost list and only Close All takes it.
+//! Close All still closes them ([`shown_extra`]). The mini-map hides its
+//! title bar but is a window like the others (`LLFloaterMap`,
+//! `floater_map.xml`), so Close Window takes it.
 
 use crate::keybinds::{Input, Mods};
 use egui::{Id, Order};
