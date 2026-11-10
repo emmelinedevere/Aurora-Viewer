@@ -1546,7 +1546,7 @@ pub(crate) fn max_texture_resolution_choice(v: u32) -> u32 {
         .unwrap_or(MAX_TEXTURE_RESOLUTIONS[0])
 }
 
-const SETTINGS_VERSION: u32 = 35;
+const SETTINGS_VERSION: u32 = 36;
 
 /// The world render percentage that makes macOS draw at the display's
 /// logical resolution, as the Legacy Viewer does with RenderHiDPI 0: 50 on a
@@ -2801,29 +2801,6 @@ impl Settings {
             // still exactly on Potato or Low takes theirs (512 and 1024),
             // any other keeps 2048
             crate::graphics_presets::upgrade_max_texture_resolution(&mut self);
-            #[cfg(target_os = "macos")]
-            {
-                // macOS draws at the display's logical resolution by default
-                // now (the Legacy Viewer's RenderHiDPI 0). A profile still on
-                // the old 100 % default follows; an explicit 50–99 % is kept.
-                let mut migrated = false;
-                if self.render_scale_percent == 100 {
-                    self.render_scale_auto = true;
-                    migrated = true;
-                }
-                // A profile still exactly on the old Apple default (Medium)
-                // takes the Legacy Viewer's Mac MidHigh table; a custom, High
-                // or Deluxe profile and a named saved graphics profile are kept.
-                if self.graphics_saved_active.is_none()
-                    && crate::graphics_presets::Preset::matching(&self) == Some(crate::graphics_presets::Preset::Medium)
-                {
-                    crate::graphics_presets::macos::apply(&mut self);
-                    migrated = true;
-                }
-                if migrated {
-                    log::info!("settings v31: macOS defaults migrated (display render scale and/or Apple Silicon MidHigh)");
-                }
-            }
         }
         if self.settings_version < 32 {
             // the head turns toward the cursor's side by default, like the
@@ -2855,6 +2832,33 @@ impl Settings {
             // pictures stay on only where the tooltips were on too
             let inventory = &mut self.inventory;
             inventory.thumbnail_tooltips &= inventory.show_hover_tooltips;
+        }
+        if self.settings_version < 36 {
+            #[cfg(target_os = "macos")]
+            {
+                // macOS draws at the display's logical resolution by default
+                // now (the Legacy Viewer's RenderHiDPI 0). A profile still on
+                // the old 100 % default follows; an explicit 50–99 % is kept.
+                let mut migrated = false;
+                if self.render_scale_percent == 100 {
+                    self.render_scale_auto = true;
+                    migrated = true;
+                } else {
+                    self.render_scale_auto = false;
+                }
+                // A profile still exactly on the old Apple default (Medium)
+                // takes the Legacy Viewer's Mac MidHigh table; a custom, High
+                // or Deluxe profile and a named saved graphics profile are kept.
+                if self.graphics_saved_active.is_none()
+                    && crate::graphics_presets::Preset::matching(&self) == Some(crate::graphics_presets::Preset::Medium)
+                {
+                    crate::graphics_presets::macos::apply(&mut self);
+                    migrated = true;
+                }
+                if migrated {
+                    log::info!("settings v36: macOS defaults migrated (display render scale and/or Apple Silicon MidHigh)");
+                }
+            }
         }
         if !self.audio.mic_gain.is_finite() {
             self.audio.mic_gain = 1.0;
