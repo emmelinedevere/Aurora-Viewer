@@ -3947,7 +3947,17 @@ fn toasts_at(
         let count = console::rows(
             ctx,
             line,
-            line_job(ctx, line, p, world, want_names, 540.0, size, times, family.as_ref().map_or(JobLook::Line, JobLook::Pill)),
+            line_job(
+                ctx,
+                line,
+                p,
+                world,
+                want_names,
+                540.0,
+                size,
+                times,
+                family.as_ref().map_or(JobLook::Line, JobLook::Pill),
+            ),
         )
         .max(1);
         if count > remaining {

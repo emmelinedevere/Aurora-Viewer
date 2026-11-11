@@ -81,26 +81,6 @@ pub(super) fn shown_order(st: &InventoryUi) -> &[Uuid] {
     }
 }
 
-/// The rows the list drew last: the plain tree, Aurora's explorer folder or
-/// the result tree of a search, a filter or another tab.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(super) enum ShownOrder {
-    #[default]
-    Plain,
-    Flat,
-    Results,
-}
-
-/// The rows the list drew last, in their displayed order. Outside the list
-/// only: while the explorer draws, its rows are swapped into `plain`.
-pub(super) fn shown_order(st: &InventoryUi) -> &[Uuid] {
-    match st.shown_order {
-        ShownOrder::Plain => &st.plain.order,
-        ShownOrder::Flat => &st.flat.order,
-        ShownOrder::Results => &st.result_tree.order,
-    }
-}
-
 #[derive(Clone, Copy, PartialEq)]
 enum Arrow {
     Up,

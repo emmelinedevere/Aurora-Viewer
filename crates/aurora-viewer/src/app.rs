@@ -1433,28 +1433,6 @@ fn open_notification_to_type(
     Some(conversation)
 }
 
-/// macOS: `render_scale_percent` follows the window's backing scale while
-/// `render_scale_auto` is on (the Legacy Viewer's RenderHiDPI 0), so moving
-/// the window to a 1x, 1.5x or 2x display changes the world resolution
-/// without a restart. Returns whether the percentage changed.
-#[cfg(target_os = "macos")]
-fn sync_auto_render_scale(settings: &mut crate::settings::Settings, scale_factor: f64) -> bool {
-    if !settings.render_scale_auto {
-        return false;
-    }
-    let percent = crate::settings::auto_render_scale(scale_factor);
-    if settings.render_scale_percent == percent {
-        return false;
-    }
-    settings.render_scale_percent = percent;
-    true
-}
-
-#[cfg(not(target_os = "macos"))]
-fn sync_auto_render_scale(_: &mut crate::settings::Settings, _: f64) -> bool {
-    false
-}
-
 impl App {
     // Growing editor state must not accumulate large return-value temporaries
     // on the Windows main stack while the avatar library is being loaded.

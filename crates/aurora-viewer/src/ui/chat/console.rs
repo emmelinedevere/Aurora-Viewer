@@ -655,9 +655,15 @@ mod tests {
                     let limit = wrapped as u32 + 1;
                     let within = draw(limit);
                     assert_eq!(within.len(), 2, "{case}: {within:?}");
-                    assert!(within.iter().any(|(text, _)| text.contains("console-wrapped")), "{case}: {within:?}");
+                    assert!(
+                        within.iter().any(|(text, _)| text.contains("console-wrapped")),
+                        "{case}: {within:?}"
+                    );
                     assert!(within.iter().any(|(text, _)| text.contains("console-newest")), "{case}: {within:?}");
-                    assert!(!within.iter().any(|(text, _)| text.contains("console-oldest")), "{case}: {within:?}");
+                    assert!(
+                        !within.iter().any(|(text, _)| text.contains("console-oldest")),
+                        "{case}: {within:?}"
+                    );
                     assert_eq!(within.iter().map(|(_, rows)| rows).sum::<usize>(), limit as usize, "{case}");
                     let newest = draw(limit - 1);
                     assert_eq!(newest.len(), 1, "{case}: {newest:?}");
