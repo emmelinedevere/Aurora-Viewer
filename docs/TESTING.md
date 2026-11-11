@@ -4498,6 +4498,7 @@ both open states and the selection count. Capture at frame 620.
 | `AURORA_DEMO_HAIR=<layers>[,<segments>[,<empty>[,<period>]]]` | Transparent face load: stacked shells on the avatars |
 | `AURORA_DEMO_HALO=1` | A wide translucent pane 3 m ahead of the start position, facing the camera (#556) |
 | `AURORA_DEMO_BLEND_AO=1` | A face whose two halves differ in alpha mode, under a hat brim, ahead and left of the start position (#882) |
+| `AURORA_DEMO_WET_LAYER=1` | Three spheres under transparent shells, two with a shiny blended legacy material: the wet layers of mesh bodies (#1420) |
 | `AURORA_DEMO_LASHES=1` | With `AURORA_DEMO_HAIR`: a red ball worn inside our hair, as eyelashes behind a fringe |
 | `AURORA_DEMO_HAIR_CARDS=<n>[,layered[,outer]]` | Our avatar wears one face of `n` soft strand cards, overlapping in a shuffled order, or layered as a hair is made (#935) |
 | `AURORA_DEMO_SHEER=1` | Our avatar wears a sheer knit dress over a red layer drawn after it (#1300) |
@@ -7436,6 +7437,7 @@ failure. Grid validation and any paid upload are performed by the human.
 - **`AURORA_DEMO_LOGIN=add-mfa`**: one saved account and the Add form open with a second synthetic identity typed in; Log in sends it to the offline server, which asks for the second factor 1.2 s later. The challenge must stay in the Add form with the new identity (never the saved card's), and the log line `demo login: request for a new account` names which identity was sent, without the name. `AURORA_DEMO_LOGIN_SUBMIT=<frame>[,<frame>…]` presses Log in at those frames for captures (`AURORA_DEMO_LOGIN_SUBMIT=40`, `AURORA_CAPTURE_FRAMES=170`). The demo never touches the system credential store.
 - **`AURORA_DEMO_LOGIN=mfa-refused`**: the first-account form with a synthetic code typed in. The offline server refuses a request that carries a code the way the grid refuses a wrong one, and challenges a request without one. With `AURORA_DEMO_LOGIN_SUBMIT=40,300`, the log must read `code true` for the first request and `code false` for the second, and the second answer opens an empty code field (capture frames 200 and 500).
 - **`AURORA_DEMO_LOGIN=terms`**: the first-account form with a synthetic identity typed in. The offline server asks first to accept the Terms of Service (reason "tos"), then to read a critical message (reason "critical"), then answers as the other demo forms do. The terms step shows the server's text, a "Read the Terms of Service" link (Linden Lab's page on their grids, else the address the message names) and its checkbox; the critical step shows its own title, text and checkbox. With `AURORA_DEMO_LOGIN_SUBMIT=40,300,560` (check each box by hand between the presses, or capture frames 200 and 460), the log reads `demo login: agree_to_tos false, read_critical false`, then `agree_to_tos true, read_critical false`: accepting the terms never acknowledges the message.
+- **`AURORA_DEMO_LOGIN=next-server`**: the first-account form with a synthetic identity typed in. The offline server sends the login on to another server, `login.other-grid.example` (`LoginError::NextServer`): the form shows the "Another login server" step with that name and its checkbox, and Log in stays disabled until the box is checked. With `AURORA_DEMO_LOGIN_SUBMIT=40,300` (check the box by hand between the presses, or capture frame 200), the log reads `demo login: the login server sends the login on to another server` once; the second press ends as the other demo forms do. The rule itself (same server followed, another one asked, encrypted to unencrypted refused) is in the unit tests of `aurora-net/src/login.rs`.
 
 - **`AURORA_DEMO_LOGIN=drag|drag2|drag-card|drag-card2`**: eight/two synthetic profiles with a left-button side-grip or portrait gesture injected into egui at frames 20–44. Capture frame 40 while held and frame 75 after release. With eight profiles, check continuous card motion, clipped neighbours, circular wrapping, final alignment and central selection without connecting. With two profiles, the same gesture must keep the cards fixed, without arrows or connecting. Input injection never moves the OS pointer. Manually drag in both directions from portraits, place images, names, card padding and Connect buttons; release over a card/outside the window and resize during motion. A simple click still connects, while grid/start menus and text-field drag selection remain usable. Also check Enter, dialogs and short-window vertical scrolling outside the browse row.
 
@@ -11110,6 +11112,18 @@ What the inventory must show with these scenarios:
   `AURORA_DEMO_HAIR=8,24,60,16` and `AURORA_RIGGED_BLEND=write`, the ring
   of #556 (the pane missing around the hair) appears; by default it does
   not.
+- **`AURORA_DEMO_WET_LAYER=1`**: three skin-coloured spheres 2.5 m ahead
+  of the start position (`AURORA_DEMO_POS`) and to the left of our avatar,
+  from the avatar outwards, each under a slightly larger shell: a
+  transparent texture (alpha 0) with a blended legacy material whose
+  specular map holds drips, as a body's wet layer; the built-in transparent
+  texture with the same material, as the shine layers of heads and eyes;
+  the transparent texture with no material, a control. With
+  `AURORA_DEMO_POS=100,100` the spheres stand on the right of the screen.
+  The first two show the drips reflecting the sky and nothing else of their
+  shell; the control shows nothing (#1420, the alpha max(texture alpha,
+  glare) of class3/deferred/materialF.glsl). Before the fix, no shell
+  showed anything.
 - **`AURORA_DEMO_BLEND_AO=1`**: a flat face 4 m ahead of the start
   position (`AURORA_DEMO_POS`) and 1.6 m to its left, above our avatar's
   head, turned towards the camera: two halves alike, the left one blended
