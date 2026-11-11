@@ -19,8 +19,9 @@ pub(super) fn navigate(ui: &egui::Ui, inv: &Inventory, st: &mut InventoryUi, fil
     } else {
         ShownOrder::Plain
     };
+    let selected_after_delete = delete::reconcile_selection(inv, st);
     if !clipboard::list_has_focus(ui, st) || st.rename.is_some() {
-        return false;
+        return selected_after_delete;
     }
     let mut keys = Vec::new();
     ui.input_mut(|input| {
@@ -56,7 +57,28 @@ pub(super) fn navigate(ui: &egui::Ui, inv: &Inventory, st: &mut InventoryUi, fil
             Arrow::Left | Arrow::Right => fold(inv, st, filtered, arrow == Arrow::Right),
         }
     }
-    navigated
+    navigated || selected_after_delete
+}
+
+/// The rows the list drew last: the plain tree, Aurora's explorer folder or
+/// the result tree of a search, a filter or another tab.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum ShownOrder {
+    #[default]
+    Plain,
+    Flat,
+    Results,
+}
+
+/// The actual displayed order, including when the explorer temporarily swaps
+/// its rows into `plain`. Deletion without a confirmation can start there.
+pub(super) fn shown_order(st: &InventoryUi) -> &[Uuid] {
+    match st.shown_order {
+        ShownOrder::Plain => &st.plain.order,
+        ShownOrder::Flat if st.aurora.is_some_and(|frame| frame.explorer) => &st.plain.order,
+        ShownOrder::Flat => &st.flat.order,
+        ShownOrder::Results => &st.result_tree.order,
+    }
 }
 
 /// The rows the list drew last: the plain tree, Aurora's explorer folder or
