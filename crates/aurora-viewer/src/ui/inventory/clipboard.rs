@@ -120,25 +120,22 @@ fn pending_focus_id() -> egui::Id {
     egui::Id::unique("inventory_pending_focus")
 }
 
-/// The list to focus, the widget that had it when the document closed, and
-/// the frame from which the request may be taken.
-type PendingFocus = (egui::Id, Option<egui::Id>, u64);
+/// The originating list and the frame from which it may take focus.
+type PendingFocus = (egui::Id, u64);
 
 /// Hands the keyboard back to `focus` (a list's [`focus_id`]) once the window
 /// above it is gone. A document lives in a window state of its own, so the
 /// request waits in the context for the list that opened it to take it.
-pub(super) fn return_focus_to(ctx: &egui::Context, focus: egui::Id) {
+pub(crate) fn return_focus_to(ctx: &egui::Context, focus: egui::Id) {
     let at = ctx.cumulative_frame_nr() + 2;
-    let from = ctx.memory(|m| m.focused());
-    ctx.data_mut(|d| d.insert_temp(pending_focus_id(), Some((focus, from, at))));
+    ctx.data_mut(|d| d.insert_temp(pending_focus_id(), Some((focus, at))));
     ctx.request_repaint();
 }
 
 /// The document `st` closed: ask the list that opened it for the keyboard.
 pub(super) fn return_document_focus(ctx: &egui::Context, st: &mut InventoryUi) {
-    match st.document_owner {
-        Some(owner) => return_focus_to(ctx, owner),
-        None => return_focus(ctx, st),
+    if let Some(owner) = st.document_owner.take() {
+        return_focus_to(ctx, owner);
     }
 }
 
@@ -183,7 +180,7 @@ pub(super) fn list_focus(ui: &mut egui::Ui, st: &mut InventoryUi, height: f32) {
     // outlive the close by a pass or two, so the request stays a few passes.
     let now = ui.ctx().cumulative_frame_nr();
     let focused = ui.memory(|m| m.focused());
-    if let Some((focus, from, at)) = ui.ctx().data(|d| d.get_temp::<Option<PendingFocus>>(pending_focus_id())).flatten() {
+    if let Some((focus, at)) = ui.ctx().data(|d| d.get_temp::<Option<PendingFocus>>(pending_focus_id())).flatten() {
         if focus == focus_id(st) {
             if leaving || now > at + 2 {
                 ui.ctx().data_mut(|d| d.remove_temp::<Option<PendingFocus>>(pending_focus_id()));
@@ -191,11 +188,13 @@ pub(super) fn list_focus(ui: &mut egui::Ui, st: &mut InventoryUi, height: f32) {
                 && ui.is_enabled()
                 && st.dialog.is_none()
                 && !egui::Popup::is_any_open(ui.ctx())
-                && (focused.is_none() || focused == from)
+                && focused.is_none()
                 && ui.memory(|m| m.allows_interaction(ui.layer_id()))
             {
                 ui.ctx().data_mut(|d| d.remove_temp::<Option<PendingFocus>>(pending_focus_id()));
                 request_focus(ui, st);
+            } else {
+                ui.ctx().request_repaint();
             }
         } else if now > at + 2 {
             ui.ctx().data_mut(|d| d.remove_temp::<Option<PendingFocus>>(pending_focus_id()));
@@ -397,7 +396,7 @@ pub(super) fn shortcuts(
     {
         super::delete::shortcut(ui, inv, st, prefs, facts, actions);
     }
-    if st.dialog.is_some() {
+    if st.dialog.is_some() || st.rename.is_some() {
         return;
     }
     super::keyboard::open_shortcut(ui, inv, st, prefs, facts, actions);
@@ -1381,6 +1380,90 @@ mod tests {
                 assert!(h.st.dialog.is_some(), "{close}: Delete reaches the list without a click");
             }
         }
+    }
+
+    fn close_inventory_note(h: &mut Harness, item: Uuid, owner: egui::Id) {
+        for _ in 0..3 {
+            h.frame(Vec::new());
+        }
+        let document =
+            h.st.windows
+                .iter()
+                .find(|w| w.state.preview == Some(item))
+                .expect("the document window");
+        assert_eq!(document.state.document_owner, Some(owner));
+        let window = super::super::document::preview_window_id(document.state.ui_id, item, 7);
+        crate::ui::widgets::close_floater(&h.ctx, &window);
+        for _ in 0..6 {
+            h.frame(Vec::new());
+        }
+        assert!(
+            h.st.windows.iter().all(|w| w.state.preview != Some(item)),
+            "the document window closed"
+        );
+    }
+
+    fn open_and_close_selected_note(h: &mut Harness, window: &str, owner: egui::Id) {
+        let item = id(8103);
+        h.click(h.row_in(item, window), Default::default());
+        let actions = h.frame(vec![enter_key()]);
+        assert!(
+            matches!(actions.as_slice(), [InvAction::Preview(selected, Some(origin))] if *selected == item && *origin == owner),
+            "Enter should open the notecard from {window}"
+        );
+        h.st.open_document(&h.ctx, item, 7, Some(owner));
+        close_inventory_note(h, item, owner);
+        assert!(
+            h.ctx.memory(|m| m.has_focus(owner)),
+            "the list that opened the document has the keyboard"
+        );
+        h.frame(vec![key(egui::Key::ArrowDown)]);
+    }
+
+    #[test]
+    fn closing_a_notecard_gives_the_list_its_keyboard_back() {
+        let mut h = Harness::new();
+        let owner = focus_id(&h.st);
+        open_and_close_selected_note(&mut h, "inventory", owner);
+        assert!(
+            h.st.selected.is_some_and(|item| item != id(8103)),
+            "Down moves the main list selection"
+        );
+    }
+
+    #[test]
+    fn a_document_window_returns_the_keyboard_to_the_list_that_opened_it() {
+        let mut h = Harness::new();
+        h.st.open_folder_window(id(8000));
+        let window = format!("inventory_{}", h.st.windows[0].id);
+        super::super::super::widgets::place_floater(&h.ctx, &window, egui::pos2(20.0, 50.0), egui::vec2(600.0, 800.0));
+        for _ in 0..4 {
+            h.frame(Vec::new());
+        }
+        let owner = focus_id(&h.st.windows[0].state);
+        assert_ne!(owner, focus_id(&h.st));
+        let main_selection = h.st.selected;
+        open_and_close_selected_note(&mut h, &window, owner);
+        assert!(
+            h.st.windows[0].state.selected.is_some_and(|item| item != id(8103)),
+            "Down moves the folder selection"
+        );
+        assert_eq!(h.st.selected, main_selection, "Down leaves the main list alone");
+    }
+
+    #[test]
+    fn closing_a_notecard_preserves_an_active_inventory_search() {
+        let mut h = Harness::new();
+        h.st.focus_search = true;
+        h.frame(Vec::new());
+        let search = h.ctx.memory(|m| m.focused()).expect("the inventory search has focus");
+        let owner = focus_id(&h.st);
+        assert_ne!(search, owner);
+        let item = id(8103);
+        h.st.open_document(&h.ctx, item, 7, Some(owner));
+        close_inventory_note(&mut h, item, owner);
+        h.frame(vec![Event::Text("needle".into())]);
+        assert_eq!(h.st.search, "needle", "closing the note preserves the active search field");
     }
 
     #[test]
