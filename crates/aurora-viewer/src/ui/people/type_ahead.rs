@@ -7,9 +7,8 @@
 //!
 //! The Legacy Viewer searches the first text column of its list (the username
 //! of the friend list). Aurora's rows show the chosen name, so every form the
-//! row knows is matched: the visible name first, then the username and the
-//! full name. A superset of the Legacy Viewer, never a different row when the
-//! username is the one typed.
+//! row knows is matched. When a display name and another person's username
+//! share a prefix, the first matching row in the current list order wins.
 
 use egui::{Align, Id, Key, Rect, Ui};
 use uuid::Uuid;
@@ -25,33 +24,88 @@ pub(crate) struct Entry<'a> {
     pub names: [&'a str; 3],
 }
 
-/// The buffer and the row a match asked to bring into view, kept between
-/// frames under the list's focus id.
+/// The prefix kept between frames while the list owns the keyboard.
 #[derive(Default, Clone)]
 struct Search {
     text: String,
     reset_at: f64,
-    reveal: Option<Uuid>,
 }
 
-/// Takes the characters typed while `focus` owns the keyboard; returns the
-/// row to select. `selected` is the row the keyboard starts from when one
-/// character is repeated.
-pub(crate) fn keys(ui: &Ui, focus: Id, entries: &[Entry<'_>], selected: Option<Uuid>) -> Option<Uuid> {
-    if !ui.memory(|m| m.has_focus(focus)) {
-        return None;
+/// The list's focus and the match to reveal while drawing its rows this frame.
+#[derive(Clone, Copy)]
+pub(crate) struct Navigation {
+    focus: Id,
+    pub chosen: Option<Uuid>,
+}
+
+impl Navigation {
+    pub fn new<'a>(ui: &Ui, focus: Id, selected: Option<Uuid>, entries: impl FnOnce() -> Vec<Entry<'a>>) -> Self {
+        let background = ui.interact(ui.available_rect_before_wrap(), focus, egui::Sense::click());
+        if background.clicked() {
+            background.request_focus();
+        }
+        let key = focus.with("type-ahead");
+        let has_focus = background.has_focus();
+        if !has_focus || background.gained_focus() {
+            ui.ctx().data_mut(|data| data.remove::<Search>(key));
+        }
+        if has_focus {
+            // Offer native composition at the list, as TextEdit does at its caret.
+            let to_global = ui.ctx().layer_transform_to_global(ui.layer_id()).unwrap_or_default();
+            let rect = background.interact_rect;
+            let cursor = Rect::from_min_size(rect.min, egui::vec2(1.0, ui.spacing().interact_size.y));
+            ui.output_mut(|out| {
+                out.ime = Some(egui::output::IMEOutput {
+                    purpose: egui::IMEPurpose::Normal,
+                    rect: to_global * rect,
+                    cursor_rect: to_global * cursor,
+                    should_interrupt_composition: false,
+                });
+            });
+        }
+        let chosen = if has_focus && ui.input(|input| input.events.iter().any(is_search_event)) {
+            keys(ui, key, &entries(), selected)
+        } else {
+            None
+        };
+        Self { focus, chosen }
     }
+
+    /// Call before skipping clipped rows so an off-screen match can scroll into view.
+    pub fn row(self, ui: &Ui, response: &egui::Response, rect: Rect, id: Uuid) {
+        if self.chosen == Some(id) {
+            ui.scroll_to_rect(rect, Some(Align::Center));
+        }
+        if response.clicked() || response.secondary_clicked() {
+            ui.memory_mut(|memory| memory.request_focus(self.focus));
+        }
+    }
+}
+
+fn is_search_event(event: &egui::Event) -> bool {
+    matches!(
+        event,
+        egui::Event::Text(_)
+            | egui::Event::Ime(egui::ImeEvent::Commit(_))
+            | egui::Event::Key {
+                key: Key::Backspace,
+                pressed: true,
+                ..
+            }
+    )
+}
+
+fn keys(ui: &Ui, key: Id, entries: &[Entry<'_>], selected: Option<Uuid>) -> Option<Uuid> {
     let now = ui.input(|i| i.time);
-    let key = focus.with("type-ahead");
     let mut search = ui.ctx().data(|d| d.get_temp::<Search>(key)).unwrap_or_default();
     expire(&mut search, now);
     let mut chosen = None;
     ui.input(|i| {
         for event in &i.events {
             match event {
-                egui::Event::Text(text) => {
+                egui::Event::Text(text) | egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
                     for c in text.chars() {
-                        if let Some(id) = typed(&mut search, entries, selected.or(chosen), c, now) {
+                        if let Some(id) = typed(&mut search, entries, chosen.or(selected), c, now) {
                             chosen = Some(id);
                         }
                     }
@@ -66,9 +120,7 @@ pub(crate) fn keys(ui: &Ui, focus: Id, entries: &[Entry<'_>], selected: Option<U
                     if !search.text.is_empty()
                         && let Some(index) = prefix(entries, &search.text)
                     {
-                        let id = entries[index].id;
-                        search.reveal = Some(id);
-                        chosen = Some(id);
+                        chosen = Some(entries[index].id);
                     }
                 }
                 _ => {}
@@ -77,22 +129,6 @@ pub(crate) fn keys(ui: &Ui, focus: Id, entries: &[Entry<'_>], selected: Option<U
     });
     ui.ctx().data_mut(|d| d.insert_temp(key, search));
     chosen
-}
-
-/// Brings the row `id` into view when it is the one a name typed asked for.
-/// Call it right after the row's rectangle is known, even when the row is
-/// outside the viewport.
-pub(crate) fn reveal(ui: &Ui, focus: Id, rect: Rect, id: Uuid) {
-    let key = focus.with("type-ahead");
-    let Some(mut search) = ui.ctx().data(|d| d.get_temp::<Search>(key)) else {
-        return;
-    };
-    if search.reveal != Some(id) {
-        return;
-    }
-    ui.scroll_to_rect(rect, Some(Align::Center));
-    search.reveal = None;
-    ui.ctx().data_mut(|d| d.insert_temp(key, search));
 }
 
 /// A pause longer than TypeAheadTimeout starts the search afresh.
@@ -112,7 +148,6 @@ fn typed(search: &mut Search, entries: &[Entry<'_>], selected: Option<Uuid>, c: 
     if let Some(index) = prefix(entries, &target) {
         search.text = target;
         search.reset_at = now + TIMEOUT;
-        search.reveal = Some(entries[index].id);
         return Some(entries[index].id);
     }
     if repeated(&target) && !entries.is_empty() {
@@ -127,7 +162,6 @@ fn typed(search: &mut Search, entries: &[Entry<'_>], selected: Option<Uuid>, c: 
                 .any(|name| name.chars().next().is_some_and(|first| starts(first, &lower)))
             {
                 search.reset_at = now + TIMEOUT;
-                search.reveal = Some(entries[index].id);
                 return Some(entries[index].id);
             }
         }
@@ -139,9 +173,8 @@ fn typed(search: &mut Search, entries: &[Entry<'_>], selected: Option<Uuid>, c: 
 fn prefix(entries: &[Entry<'_>], target: &str) -> Option<usize> {
     entries.iter().position(|entry| {
         entry.names.iter().any(|name| {
-            let mut first = String::new();
-            first.extend(name.chars().flat_map(char::to_lowercase));
-            first.starts_with(target)
+            let mut folded = name.chars().flat_map(char::to_lowercase);
+            target.chars().all(|c| folded.next() == Some(c))
         })
     })
 }
@@ -170,8 +203,9 @@ mod tests {
     fn entries<'a>(names: &'a [(&'a str, &'a str)]) -> Vec<Entry<'a>> {
         names
             .iter()
-            .map(|(name, username)| Entry {
-                id: Uuid::from_u128(name.len() as u128),
+            .enumerate()
+            .map(|(index, (name, username))| Entry {
+                id: Uuid::from_u128(1 + index as u128),
                 names: [name, username, ""],
             })
             .collect()
@@ -212,6 +246,75 @@ mod tests {
         assert_eq!(typed(&mut s, &e, first, 'a', 0.0), Some(e[1].id));
         assert_eq!(typed(&mut s, &e, Some(e[1].id), 'a', 0.0), Some(e[0].id));
         assert_eq!(s.text, "a");
+    }
+
+    #[test]
+    fn batched_letters_cycle_from_the_last_match_and_focus_resets_the_prefix() {
+        let mut frames = crate::ui::widgets::elide_tests::Frames::new();
+        let friends = entries(&[("Alice", ""), ("Amber", ""), ("Aria", ""), ("Bob", "")]);
+        let focus = Id::unique("list");
+        let mut built = 0;
+        let mut frame = |events: Vec<egui::Event>, owner: Id, selected: Option<Uuid>| {
+            let mut chosen = None;
+            frames.run(events, |ui| {
+                ui.memory_mut(|memory| memory.request_focus(owner));
+                chosen = Navigation::new(ui, focus, selected, || {
+                    built += 1;
+                    friends.clone()
+                })
+                .chosen;
+            });
+            chosen
+        };
+        assert_eq!(frame(Vec::new(), focus, None), None);
+        assert_eq!(
+            frame(
+                vec![egui::Event::Text("aa".into()), egui::Event::Text("a".into())],
+                focus,
+                Some(friends[3].id)
+            ),
+            Some(friends[2].id)
+        );
+        // This frame belongs to another widget; the old "a" must not prefix "b".
+        assert_eq!(
+            frame(vec![egui::Event::Text("ignored".into())], Id::unique("elsewhere"), None),
+            None
+        );
+        assert_eq!(frame(vec![egui::Event::Text("b".into())], focus, None), Some(friends[3].id));
+        assert_eq!(built, 2, "idle and unfocused lists never build search entries");
+    }
+
+    #[test]
+    fn composing_a_name_jumps_only_when_the_ime_commits_to_the_focused_list() {
+        let mut frames = crate::ui::widgets::elide_tests::Frames::new();
+        let friends = entries(&[("山田", ""), ("山本", ""), ("山本A", "")]);
+        let focus = Id::unique("composed-name-list");
+        let preedit = |text: &str| {
+            egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: text.into(),
+                active_range_chars: None,
+            })
+        };
+        let commit = |text: &str| egui::Event::Ime(egui::ImeEvent::Commit(text.into()));
+        let mut frame = |events, owner, selected| {
+            let mut chosen = None;
+            let (_, output) = frames.run_with_output(events, |ui| {
+                if !ui.memory(|mem| mem.has_focus(owner)) {
+                    ui.memory_mut(|mem| mem.request_focus(owner));
+                }
+                chosen = Navigation::new(ui, focus, selected, || friends.clone()).chosen;
+            });
+            (chosen, output.ime.is_some())
+        };
+        assert_eq!(frame(vec![], focus, None), (None, true));
+        assert_eq!(frame(vec![preedit("山")], focus, None), (None, true));
+        assert_eq!(frame(vec![preedit(""), commit("山")], focus, None), (Some(friends[0].id), true));
+        assert_eq!(
+            frame(vec![commit("本"), egui::Event::Text("A".into())], focus, Some(friends[0].id)),
+            (Some(friends[2].id), true)
+        );
+        assert_eq!(frame(vec![commit("山")], Id::unique("another-widget"), None), (None, false));
+        assert_eq!(frame(vec![commit("山本A")], focus, None), (Some(friends[2].id), true));
     }
 
     #[test]

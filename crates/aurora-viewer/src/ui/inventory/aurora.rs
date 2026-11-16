@@ -536,6 +536,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_status_line_reports_folders_that_could_not_be_loaded() {
+        let mut h = Harness::new(800.0);
+        let p = crate::theme::Theme::default().palette();
+        let (_, text) = sync_state(&p, &h.inv, &h.st);
+        assert_eq!(text, aurora_i18n::tr!("inventory-synced"));
+        let root = h.inv.root;
+        h.inv.folders.get_mut(&root).expect("root").state = FetchState::Failed;
+        let (color, text) = sync_state(&p, &h.inv, &h.st);
+        assert_eq!(text, aurora_i18n::tr!("inventory-sync-incomplete"));
+        assert_eq!(color, p.amber, "an incomplete load is a warning, not a success");
+    }
+
+    #[test]
     fn inventory_total_is_shared_by_every_title_width() {
         let mut inv = Inventory {
             root: Uuid::from_u128(1),

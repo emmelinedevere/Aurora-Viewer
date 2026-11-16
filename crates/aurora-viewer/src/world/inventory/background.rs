@@ -430,12 +430,6 @@ impl BackgroundFetch {
         };
         let single = children.is_empty();
         let targets = if single { vec![folder] } else { children.clone() };
-        if let Err(error) = &outcome {
-            log::debug!(
-                "DIAG reply {request}: {kind:?} {folder} single={single} targets={} err={error}",
-                targets.len()
-            );
-        }
         if let Err(error) = outcome {
             // A throttled or briefly unavailable server: ask again later
             // instead of ending the walk with this folder missing. The HTTP
@@ -468,12 +462,7 @@ impl BackgroundFetch {
             // limit (the Legacy Viewer's InventoryLimitReachedAIS): record it,
             // announce it once, and still walk its subfolders.
             if error.kind == FetchFailure::TooBig && kind == Kind::FolderAndContent && single {
-                log::warn!("inventory folder {folder} is over the server's limit; its direct items cannot be loaded");
-                inv.too_big.insert(folder);
-                if !self.too_big_announced {
-                    self.too_big_announced = true;
-                    self.too_big_new.push(folder);
-                }
+                self.note_too_big(inv, &[folder], error.status);
                 for id in &targets {
                     self.pending.remove(id);
                 }
