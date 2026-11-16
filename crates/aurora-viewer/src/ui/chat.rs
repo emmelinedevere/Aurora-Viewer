@@ -4401,7 +4401,7 @@ fn toasts_at(
                             let c = visual.left_edge(name.clone().unwrap_or(at..at)).translate(rect.min.to_vec2());
                             let r =
                                 egui::Rect::from_center_size(egui::pos2(c.min.x - 2.0 - side * 0.5, c.center().y), egui::vec2(side, side));
-                            bubble_sender(painter, p, pics, wanted_pics, r, &who, line, shown);
+                            bubble_sender(painter, p, pics, picture_requests, r, &who, line, shown);
                         }
                         // the islands' pills: the sender's name acts like the
                         // conversations' (Firestorm's toast links it)
@@ -4413,7 +4413,7 @@ fn toasts_at(
                             names.push((r, line));
                         }
                         let col = color_for(line.kind, p).gamma_multiply(shown);
-                        line_extras(ui, p, world, &visual, rect.min, size, shown, badges, line_links, col, &mut links);
+                        line_extras(ui, p, world, &visual, rect.min, size, shown, badges, line_links, col, click_links);
                     });
                 if glass && let Some(slot) = slot {
                     let rect = bubble.response.rect;

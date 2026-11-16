@@ -46,19 +46,6 @@ impl ExitPrompt {
             self.answer_key = Some(key);
         }
     }
-    /// The prompt's own key, before the screen behind reads it: Enter quits
-    /// (the default button, as `widgets::modal_keys` gives it) and Escape
-    /// cancels. Nothing while a logout is in flight, and only a plain key.
-    pub fn key(&self, key: egui::Key, modifiers: egui::Modifiers) -> Option<Action> {
-        if self.pending.is_some() || !modifiers.is_none() {
-            return None;
-        }
-        match key {
-            egui::Key::Enter => Some(Action::Quit),
-            egui::Key::Escape => Some(Action::Cancel),
-            _ => None,
-        }
-    }
     pub fn confirm(&mut self, action: Action, now: Instant) -> bool {
         if self.pending.is_some() {
             return false;
