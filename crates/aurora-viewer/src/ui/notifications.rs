@@ -1184,6 +1184,64 @@ mod tests {
     /// NotificationTipToastLifeTime's default (settings.xml).
     const TOAST_TIP: f64 = 10.0;
 
+    /// Close Window reaches the Legacy Viewer's script floaters (a dialog,
+    /// a text box, a URL, an object's offer) and Aurora's stacked permission
+    /// question; a resident's offer stays out.
+    #[test]
+    fn script_windows_include_permission_questions_over_the_legacy_viewer() {
+        let note = |data| Notification {
+            id: 1,
+            time: std::time::SystemTime::UNIX_EPOCH,
+            kind: Kind::Script,
+            title: String::new(),
+            body: String::new(),
+            name_links: Vec::new(),
+            read: false,
+            data,
+            text: String::new(),
+            transient: false,
+            quiet: false,
+            maturity: 0,
+        };
+        let sender = ([127, 0, 0, 1], 1).into();
+        let offer = |task, object| Data::Inventory {
+            from: Uuid::nil(),
+            tx: Uuid::nil(),
+            asset_type: 6,
+            object,
+            task,
+            task_offer: None,
+        };
+        for data in [
+            Data::Dialog {
+                sender,
+                object: Uuid::nil(),
+                object_name: String::new(),
+                own_object: false,
+                channel: 0,
+                buttons: Vec::new(),
+            },
+            Data::TextBox {
+                sender,
+                object: Uuid::nil(),
+                channel: 0,
+            },
+            Data::Url("https://example.invalid".into()),
+            offer(true, Uuid::nil()),
+            Data::Permissions {
+                task: Uuid::nil(),
+                item: Uuid::nil(),
+                questions: 0,
+                region: Default::default(),
+                experience: None,
+                caution: None,
+            },
+        ] {
+            assert!(script_window(&note(data)));
+        }
+        assert!(!script_window(&note(offer(false, Uuid::from_u128(7)))));
+    }
+
     #[test]
     fn bell_right_click_turns_do_not_disturb_over_and_keeps_the_rest() {
         let away = crate::world::status::StatusModes {

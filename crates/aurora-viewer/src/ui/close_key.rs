@@ -17,8 +17,10 @@
 //! conversation shown instead (LLMultiFloater::closeDockedFloater); Close
 //! All still closes that window. The mini-map hides its title bar but is a
 //! window like the others (`LLFloaterMap`, `floater_map.xml`), so Close
-//! Window takes it. A script prompt kept in the notification list is not in
-//! the frontmost list ([`shown_extra`]): only Close All takes it.
+//! Window takes it. Script prompts are windows of their own while they show
+//! as toasts: Close Window takes the newest before the windows behind it
+//! ([`shown_prompt`]); kept in the notification list, Close All still closes
+//! them ([`shown_extra`]).
 
 use crate::keybinds::{Input, Mods};
 use egui::{Id, Order};
@@ -498,6 +500,44 @@ mod tests {
                 assert_eq!(key_left, !visible, "a hidden map must leave the key for the focused widget");
             }
         }
+    }
+
+    #[test]
+    fn ctrl_shift_w_closes_a_window_ctrl_w_does_not_pick() {
+        let mut frames = Frames::new();
+        let map = Id::unique("map");
+        let mut closed = false;
+        let frame = |frames: &mut Frames, events: Vec<egui::Event>, closed: &mut bool| {
+            frames.run(events, |ui| {
+                let ctx = ui.ctx().clone();
+                begin(&ctx);
+                if take(&ctx, map) {
+                    *closed = true;
+                }
+                shown_extra(&ctx, map);
+            });
+        };
+        frame(&mut frames, Vec::new(), &mut closed);
+        frame(&mut frames, vec![key(egui::Key::W, egui::Modifiers::COMMAND)], &mut closed);
+        assert!(!closed, "Ctrl+W leaves a surface outside the frontmost list");
+        // release W, or the next press is a repeat and does not close again
+        frame(
+            &mut frames,
+            vec![egui::Event::Key {
+                key: egui::Key::W,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            &mut closed,
+        );
+        frame(
+            &mut frames,
+            vec![key(egui::Key::W, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT)],
+            &mut closed,
+        );
+        assert!(closed);
     }
 
     #[test]
