@@ -160,6 +160,20 @@ impl Popped {
         });
     }
 
+    pub(super) fn rekey(&mut self, from: Uuid, to: Uuid) {
+        if let Some(w) = self.windows.iter_mut().find(|w| w.conversation == Some(from)) {
+            // Keep the floater's identity, geometry and minimized state.
+            w.conversation = Some(to);
+            w.view.selected = Some(to);
+            if w.view.selection.0 == Some(from) {
+                w.view.selection.0 = Some(to);
+            }
+            if w.view.reveal == Some(from) {
+                w.view.reveal = Some(to);
+            }
+        }
+    }
+
     /// The window of `conversation` waits for the next frame to draw: the
     /// Conversations window drew that conversation in this one (one field,
     /// one selection in a frame).
@@ -186,6 +200,14 @@ impl Popped {
     /// The window of `conversation` is on screen: popped out, not put away.
     pub(super) fn shown(&self, conversation: Option<Uuid>) -> bool {
         self.windows.iter().any(|w| w.conversation == conversation && !w.hidden)
+    }
+
+    #[cfg(test)]
+    pub(super) fn focus_requested(&self, conversation: Option<Uuid>) -> bool {
+        self.windows
+            .iter()
+            .find(|w| w.conversation == conversation && !w.hidden)
+            .is_some_and(|w| w.view.conv_focus_request)
     }
 
     /// Put the window of `conversation` away, or show it back; false when
@@ -627,6 +649,7 @@ mod tests {
                         origin: crate::world::Origin::Live,
                         blocked: false,
                         beyond_range: false,
+                        speaker: Default::default(),
                     },
                 );
             }
@@ -754,6 +777,7 @@ mod tests {
                         origin: crate::world::Origin::Live,
                         blocked: false,
                         beyond_range: false,
+                        speaker: Default::default(),
                     },
                 );
                 kit.st.popped.pop_out(Some(id), false, false, false);
@@ -1041,6 +1065,7 @@ mod tests {
                             origin: crate::world::Origin::Live,
                             blocked: false,
                             beyond_range: false,
+                            speaker: Default::default(),
                         },
                     );
                     kit.world.social.focus_im = Some(JANE);
@@ -1154,6 +1179,7 @@ mod tests {
                     origin: crate::world::Origin::Live,
                     blocked: false,
                     beyond_range: false,
+                    speaker: Default::default(),
                 },
             );
             kit.main_open = true;
@@ -1269,6 +1295,13 @@ mod tests {
         assert!(popped.raise(None, true));
         assert!(popped.shown(None) && popped.windows[0].view.conv_focus_request);
         assert_eq!(in_sight(&ctx, &popped).collect::<Vec<_>>(), [None]);
+        ctx.data_mut(|data| {
+            data.insert_persisted(egui::Id::unique((floater_id(None), "minimized")), true);
+        });
+        assert!(
+            in_sight(&ctx, &popped).all(|conversation| conversation.is_some()),
+            "a collapsed nearby-chat floater is not in sight"
+        );
         popped.set_hidden(None, true);
         popped.pop_out(None, false, false, false);
         assert!(popped.shown(None));

@@ -32,8 +32,16 @@ impl World {
         if let NetCommand::OfferTeleport { to, .. } = command {
             self.rlva_filter_teleport_offer(to);
         }
+        if actor.is_nil() && self.rlva_take_decided(command) {
+            return Boundary::Send;
+        }
+        // callback_script_dialog (llviewermessage.cpp): the answer of a
+        // dialog on channel 0, shown before @sendchat, is dropped silently
+        if actor.is_nil() && matches!(command, NetCommand::ScriptDialogReply { channel: 0, .. }) && self.rlva.has("sendchat") {
+            return Boundary::Dropped;
+        }
         let im_placeholder = actor.is_nil() && self.rlva_prepare_outgoing_im(command);
-        if !im_placeholder && !self.rlva_allows_command(command, actor) {
+        if !im_placeholder && !self.rlva.teleport_already_checked && !self.rlva_allows_command(command, actor) {
             return Boundary::Refused;
         }
         Boundary::Send
@@ -44,14 +52,23 @@ impl World {
     /// added on the wire; the watchdog replaces what a replacing wear may
     /// replace once the object's point is known.
     pub fn rlva_note_sent(&mut self, command: &mut NetCommand, actor: Uuid, now: std::time::Instant) {
+        // @showloc compares a pick update to its previous saved position.
+        // Only a permitted update can become that position for the next edit.
+        if let NetCommand::PickUpdate(pick) = command {
+            self.profiles.pick_saved(self.agent_id, (**pick).clone());
+        }
         self.rlva_note_attachment_command(command, actor, now);
         self.note_outfit_command(command);
         self.rlva.note_sit_command(command, actor);
+        if let NetCommand::OfferTeleport { to, .. } = command {
+            self.teleport_invites.request_answers.retain(|id| !to.contains(id));
+        }
         // handle_object_sit (llviewermenu.cpp) and RlvForceHandler<RLV_BHVR_SIT>
         // (rlvhandler.cpp), setSitSource: a sit asked while @standtp is held,
         // by hand or by a script, records where the avatar stood. Standing
-        // up brings it back there (rlva_update_stand).
-        if matches!(command, NetCommand::RequestSit { .. }) && self.rlva.has("standtp") {
+        // up brings it back there (rlva_sitting_tick). `/siton` and the area
+        // search record nothing (`Sitting::no_sit_source`).
+        if matches!(command, NetCommand::RequestSit { .. }) && self.rlva.has("standtp") && !self.rlva.sitting.no_sit_source {
             self.rlva.stand_origin = self.main_region.map(|h| (h, self.agent.position));
         }
         if self.rlva.enabled()

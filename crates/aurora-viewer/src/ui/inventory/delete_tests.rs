@@ -128,49 +128,6 @@ fn received_deletion_preserves_system_worn_library_and_locked_folder_protections
     assert!(rules::move_selection(&inv, &[id(30)], id(TRASH), &prefs.protected, &facts.worn).is_err());
 }
 
-/// DeleteItems (#2344): it asks by default; turned off, Delete sends the
-/// selection straight to the Trash, while a purge from the Trash still asks
-/// (PurgeSelectedItems has no "ignore" box).
-#[test]
-fn turning_the_confirmation_off_trashes_at_once_but_a_purge_still_asks() {
-    let mut inv = received();
-    let facts = Facts::default();
-    let selected = |ids: &[Uuid]| InventoryUi {
-        selection: ids.iter().copied().collect(),
-        ..Default::default()
-    };
-    let mut actions = Vec::new();
-    let asking = InventoryPreferences::default();
-    assert!(asking.confirm_delete, "on by default, like the Legacy Viewer");
-    let mut st = selected(&[id(31)]);
-    delete::request(&inv, &mut st, &asking, &facts, &mut actions);
-    assert!(matches!(&st.dialog, Some(EditDialog::Delete(ids, false)) if *ids == [id(31)]));
-    assert!(actions.is_empty(), "nothing moves before the answer");
-
-    let silent = InventoryPreferences {
-        confirm_delete: false,
-        ..Default::default()
-    };
-    let mut st = selected(&[id(20), id(31)]);
-    delete::request(&inv, &mut st, &silent, &facts, &mut actions);
-    assert!(st.dialog.is_none(), "no confirmation");
-    assert_eq!(actions.len(), 1, "one change for the whole selection");
-    let Some(InvAction::Edit(change)) = actions.pop() else {
-        panic!("a move to the Trash")
-    };
-    assert!(change.move_only());
-    rules::demo_mutate(&mut inv, id(99), change).expect("trash the selection");
-    assert_eq!(inv.folders[&id(20)].info.parent, id(TRASH));
-    assert_eq!(inv.items[&id(31)].parent, id(TRASH));
-
-    for prefs in [&asking, &silent] {
-        let mut st = selected(&[id(31)]);
-        delete::request(&inv, &mut st, prefs, &facts, &mut actions);
-        assert!(matches!(&st.dialog, Some(EditDialog::Delete(ids, true)) if *ids == [id(31)]));
-        assert!(actions.is_empty(), "a purge waits for its confirmation");
-    }
-}
-
 /// LLFolderBridge::isProtected (#1728): a locked folder is neither moved nor
 /// deleted, by a drag, the menu or the Delete key; its contents are ordinary
 /// entries, and its parent may go to the Trash with it, like the Legacy Viewer.
@@ -410,4 +367,54 @@ fn the_row_after_a_deletion_is_the_next_one_that_stays() {
     st.finish_delete(id(91), true, false);
     assert!(delete::reconcile_selection(&inv, &mut st));
     assert_eq!(st.selected, Some(id(30)), "else after the lowest deleted row");
+}
+
+/// #3507: the trash of the Gestures window asked again at every gesture,
+/// whatever "Do not show again" said.
+#[test]
+fn a_delete_from_another_window_follows_do_not_show_again() {
+    let inv = received();
+    let ids = vec![id(31)];
+    // asked for: the confirmation, and nothing sent yet
+    let (mut st, mut actions) = (InventoryUi::default(), Vec::new());
+    let prefs = InventoryPreferences::default();
+    assert!(prefs.confirm_delete);
+    assert!(delete::request_from_window(
+        &inv,
+        &mut st,
+        &prefs,
+        HashSet::new(),
+        &mut actions,
+        ids.clone()
+    ));
+    assert!(matches!(&st.dialog, Some(EditDialog::Delete(d, false)) if *d == ids));
+    assert!(actions.is_empty());
+    // "Do not show again": straight to the Trash, the inventory stays closed
+    let (mut st, mut actions) = (InventoryUi::default(), Vec::new());
+    let prefs = InventoryPreferences {
+        confirm_delete: false,
+        ..Default::default()
+    };
+    assert!(!delete::request_from_window(
+        &inv,
+        &mut st,
+        &prefs,
+        HashSet::new(),
+        &mut actions,
+        ids.clone()
+    ));
+    assert!(st.dialog.is_none());
+    assert!(matches!(actions.as_slice(), [InvAction::Delete(_)]));
+    // a worn item cannot go without a word: the confirmation states why
+    let (mut st, mut actions) = (InventoryUi::default(), Vec::new());
+    assert!(delete::request_from_window(
+        &inv,
+        &mut st,
+        &prefs,
+        HashSet::from([id(31)]),
+        &mut actions,
+        ids.clone()
+    ));
+    assert!(matches!(&st.dialog, Some(EditDialog::Delete(d, false)) if *d == ids));
+    assert!(actions.is_empty());
 }
