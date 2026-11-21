@@ -644,9 +644,6 @@ pub struct InventoryUi {
     thumbnail_notice: Option<progress::Notice>,
     pub message: String,
     pub dialog: Option<EditDialog>,
-    /// The "Do not show again" box of the open move-to-Trash confirmation
-    /// (`delete::open`); None while the dialog has none.
-    delete_ignore: Option<bool>,
     folder_color: Option<folder_colors::Picker>,
     move_to: Option<move_to::MoveTo>,
     pub links_filter: Option<Uuid>,

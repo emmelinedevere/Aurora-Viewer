@@ -112,6 +112,7 @@ fn alpha(seconds: f32, line: &ChatLine, now: std::time::SystemTime) -> f32 {
 /// following LLConsole::draw (indra/llui/llconsole.cpp). Headers of Aurora's
 /// cards are presentation, not message text. Measure only until the budget
 /// is full; the renderer reuses egui's cached text layouts.
+#[cfg(test)]
 pub(super) fn recent(
     world: &World,
     now: std::time::SystemTime,
