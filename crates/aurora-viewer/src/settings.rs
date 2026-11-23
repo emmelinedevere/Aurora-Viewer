@@ -706,6 +706,12 @@ pub struct Settings {
     /// Viewer always does; Preferences › Avatars › Animations). Off, our
     /// avatar keeps its pose. Camera framing is controlled independently.
     pub customize_animation: bool,
+    /// FSPlayDefaultBentoAnimation: a priority 0 Bento pose plays under
+    /// every other animation, so hands, mouth, wings and tail fall back to
+    /// a natural pose instead of staying stuck where the last animation
+    /// left them (off, as in the Legacy Viewer; Preferences › Avatars ›
+    /// Animations).
+    pub bento_idle: bool,
     pub script_editor: crate::ui::scripts::settings::ScriptSettings,
     pub username: String,
     pub remember_username: bool,
@@ -2265,6 +2271,15 @@ pub struct AudioSettings {
     pub mute_when_minimized: bool,
     /// Output device name (empty = system default).
     pub output_device: String,
+    /// Voice-only output device, the counterpart of the Legacy Viewer's
+    /// `VoiceOutputAudioDevice` (`LLPanelVoiceDeviceSettings`,
+    /// indra/newview/llpanelvoicedevicesettings.cpp). Two deliberate
+    /// differences: empty follows Aurora's `output_device`, where the Legacy
+    /// Viewer's "Default" is the system's default playout device
+    /// (indra/llwebrtc/llwebrtc.cpp); and a chosen device that is missing is
+    /// kept, voice playing on `output_device` until it comes back, where the
+    /// Legacy Viewer's panel rewrites the setting to "Default".
+    pub voice_output_device: String,
     /// Microphone name (empty = system default).
     pub input_device: String,
     /// Connect to voice chat.
@@ -2347,6 +2362,7 @@ impl Default for AudioSettings {
             stream_title_history: 10,
             mute_when_minimized: false,
             output_device: String::new(),
+            voice_output_device: String::new(),
             input_device: String::new(),
             voice_enabled: true,
             mic_hold: false,
@@ -2455,6 +2471,7 @@ impl Default for Settings {
             shape_height_feet: false,
             customize_animation: true,
             appearance_camera_movement: true,
+            bento_idle: false,
             imports: Default::default(),
             script_editor: Default::default(),
             username: String::new(),
@@ -3622,9 +3639,12 @@ impl Settings {
         }
         if self.settings_version < 43 {
             // Aurora Weather's main and card switches, off by default: an
-            // earlier file keeps on what it drew
+            // earlier file keeps on what it drew (none of its own where
+            // regions set the weather)
             self.weather.upgrade_to_switches();
         }
+        // only the migration above reads the former region switch
+        self.weather.former_region_weather = None;
         if self.settings_version < 44 {
             // the wind's defaults, a breeze: a wind off and left still
             // takes them, so that switching it on blows
@@ -3705,6 +3725,11 @@ impl Settings {
             toolbar.sanitize();
         }
         self.snapshot.sanitize();
+        // the world filters keep the photo stack's rules (8 looks at most,
+        // strengths up to 100): a longer or edited file would otherwise
+        // show "10 of 8", and a card opened would clamp its strength and
+        // switch the world filters on with no edit
+        crate::snapshot::looks::sanitize(&mut self.world_look.looks);
         self.dof.sanitize();
         self.game_control.sanitize();
         self.exposure = self.exposure.clamp(0.25, 4.0);
@@ -4294,6 +4319,51 @@ impl WaterEffectsSettings {
 
 #[cfg(test)]
 mod tests {
+    /// A settings file whose world filters break the stack's rules (more
+    /// than 8 looks, a strength past 100) is brought back to them on load,
+    /// as the photo stack is, and stays off.
+    #[test]
+    fn loaded_world_filters_keep_to_the_stacks_rules() {
+        use crate::snapshot::looks::{Layer, MAX_LAYERS, WorldLook};
+        let settings = super::Settings {
+            world_look: WorldLook {
+                on: false,
+                looks: (0..12)
+                    .map(|_| Layer {
+                        id: "Sepia".into(),
+                        strength: 250,
+                        on: true,
+                    })
+                    .collect(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+        .sanitized();
+        assert_eq!(settings.world_look.looks.len(), MAX_LAYERS);
+        assert!(settings.world_look.looks.iter().all(|l| l.strength == 100));
+        assert!(!settings.world_look.on);
+    }
+
+    #[test]
+    fn voice_output_device_defaults_to_audio_output_and_survives_settings_round_trip() {
+        use super::Settings;
+
+        assert!(Settings::default().audio.voice_output_device.is_empty());
+        // An older settings file has no voice-specific output choice. Empty
+        // means the selected normal output remains in use.
+        let old: Settings = serde_json::from_str(r#"{"audio":{"output_device":"Speakers"}}"#).expect("older preferences");
+        assert_eq!(old.audio.output_device, "Speakers");
+        assert!(old.audio.voice_output_device.is_empty());
+
+        let mut settings = old;
+        settings.audio.voice_output_device = "Headset".into();
+        let saved = serde_json::to_vec(&settings).expect("save preferences");
+        let restored: Settings = serde_json::from_slice(&saved).expect("restore preferences");
+        assert_eq!(restored.audio.output_device, "Speakers");
+        assert_eq!(restored.audio.voice_output_device, "Headset");
+    }
+
     #[test]
     fn avatar_only_hover_tips_are_off_by_default_and_for_older_preferences() {
         use super::HoverTips;
@@ -5357,6 +5427,41 @@ mod tests {
         assert!(!loaded.inventory.recent_sort.system_first);
         assert_eq!(loaded.inventory.sort, Settings::default().inventory.sort);
         assert_eq!(loaded.inventory.received_sort, Settings::default().inventory.received_sort);
+    }
+
+    /// A file from before Aurora Weather's switches turns on only the
+    /// weather it drew: with "Let regions set the weather" on, none of its
+    /// own, so the main switch stays off. A file from since keeps its
+    /// switch, whatever an older build wrote back.
+    #[test]
+    fn weather_from_before_the_switches_stays_off_where_regions_set_it() {
+        let read = |file: serde_json::Value| serde_json::from_value::<Settings>(file).expect("read settings").sanitized();
+        let own_weather = |regions: Option<bool>| {
+            let mut weather = serde_json::json!({ "amount": 0.6, "wind_max": 0.3, "aurora": true });
+            if let Some(on) = regions {
+                weather["region_weather"] = serde_json::json!(on);
+            }
+            weather
+        };
+        for version in [0, 41, 42] {
+            let regions = read(serde_json::json!({ "settings_version": version, "weather": own_weather(Some(true)) }));
+            assert!(!regions.weather.enabled, "version {version}");
+            assert!(regions.weather.precipitation_on && regions.weather.wind_on, "version {version}");
+            for regions in [None, Some(false)] {
+                let mine = read(serde_json::json!({ "settings_version": version, "weather": own_weather(regions) }));
+                assert!(mine.weather.enabled, "version {version}, {regions:?}");
+            }
+        }
+        let saved = serde_json::to_value(read(
+            serde_json::json!({ "settings_version": 42, "weather": own_weather(Some(true)) }),
+        ))
+        .expect("serialize");
+        assert!(saved["weather"].get("region_weather").is_none());
+        // switched on since: an older build's region switch changes nothing
+        let mut since = own_weather(Some(true));
+        since["enabled"] = serde_json::json!(true);
+        let kept = read(serde_json::json!({ "settings_version": SETTINGS_VERSION, "weather": since }));
+        assert!(kept.weather.enabled && kept.weather.former_region_weather.is_none());
     }
 
     /// "Hide the chat bar when not in use" became the "Chat bar" choice
