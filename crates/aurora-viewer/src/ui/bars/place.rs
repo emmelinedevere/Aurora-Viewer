@@ -361,7 +361,7 @@ fn compact_island(ui: &mut egui::Ui, p: &Palette, icons: &Icons, panels: &mut Pa
     let hot = resp.hovered() || open;
     slot_face(ui, p, rect, hot, false);
     place_options(&resp, p, st, &mut action);
-    if super::demo::get().open == Some(super::demo::Open::PlaceOptions) && ui.ctx().cumulative_frame_nr() >= 300 {
+    if super::demo::get().open == Some(super::demo::Open::PlaceOptions) && ui.ctx().cumulative_frame_nr_for(egui::ViewportId::ROOT) >= 300 {
         let id = Id::unique("bars_place_demo_options");
         let mut open = ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
         let at = Pos2::new(rect.left() + rect.width() * 0.3, rect.center().y);
