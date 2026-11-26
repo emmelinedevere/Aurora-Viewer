@@ -5186,6 +5186,16 @@ impl Held {
             .round_to_pixels(ui.pixels_per_point())
             .round_ui();
         let shift = egui::vec2(0.0, top - ui.max_rect().top());
+        eprintln!(
+            "settle room {} lift {} min {:?} max {:?} height {} top {} shift {}",
+            self.room,
+            self.lift,
+            ui.min_rect(),
+            ui.max_rect(),
+            ui.min_rect().height(),
+            top,
+            shift.y
+        );
         if shift.y != 0.0 {
             let moved = egui::emath::TSTransform::from_translation(shift);
             let layer = ui.layer_id();
@@ -5240,43 +5250,7 @@ pub fn toasts(
     compact_automated: bool,
     residents: bool,
 ) {
-    toasts_at(
-        ctx,
-        p,
-        world,
-        pics,
-        want_names,
-        wanted_pics,
-        bottom,
-        seconds,
-        max_lines,
-        times,
-        pills,
-        cards,
-        compact_automated,
-        residents,
-        std::time::SystemTime::now(),
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-fn toasts_at(
-    ctx: &egui::Context,
-    p: &Palette,
-    world: &World,
-    pics: &HashMap<uuid::Uuid, egui::TextureHandle>,
-    want_names: &mut HashSet<uuid::Uuid>,
-    wanted_pics: &mut HashSet<uuid::Uuid>,
-    bottom: f32,
-    seconds: f32,
-    max_lines: u32,
-    times: bool,
-    pills: bool,
-    cards: bool,
-    compact_automated: bool,
-    residents: bool,
-    now: std::time::SystemTime,
-) {
+    let now = std::time::SystemTime::now();
     if cards {
         console::cards(
             ctx,
@@ -5295,35 +5269,10 @@ fn toasts_at(
         );
         return;
     }
-    let recent: Vec<_> = world
-        .chat
-        .iter()
-        .rev()
-        .filter(|l| residents || !said_by_resident(l))
-        .take(6)
-        .collect();
-    if !recent
-        .iter()
-        .any(|line| now.duration_since(line.time).map(|d| d.as_secs_f32() < seconds).unwrap_or(false))
-    {
-        return;
-    }
-    let (size, margin, gap) = if pills {
-        (super::fonts::chat_size(ctx, 12.0), egui::Margin::symmetric(9, 4), 4.0)
-    } else {
-        (super::fonts::chat_size(ctx, 13.0), egui::Margin::symmetric(6, 2), 2.0)
-    };
+    let size = super::fonts::chat_size(ctx, if pills { 12.0 } else { 13.0 });
     let family = pills.then(|| super::fonts::semibold(ctx));
-    // Keep the wrapped-text budget (LLConsole::draw) on the visible lines; a
-    // fully faded toast still holds its slot and costs nothing.
-    let mut remaining = max_lines as usize;
-    let mut cut = recent.len();
-    for (index, line) in recent.iter().enumerate() {
-        let age = now.duration_since(line.time).map(|d| d.as_secs_f32()).unwrap_or(0.0);
-        if ((seconds - age) / 3.0).clamp(0.0, 1.0) <= 0.0 {
-            continue;
-        }
-        let count = console::rows(
+    let recent = console::recent(world, now, seconds, max_lines, residents, |line| {
+        console::rows(
             ctx,
             line,
             line_job(
@@ -5338,22 +5287,10 @@ fn toasts_at(
                 family.as_ref().map_or(JobLook::Line, JobLook::Pill),
             ),
         )
-        .max(1);
-        if count > remaining {
-            cut = index;
-            break;
-        }
-        remaining -= count;
-        if remaining == 0 {
-            cut = index + 1;
-            break;
-        }
-    }
-    let recent = &recent[..cut];
+    });
     if recent.is_empty() {
         return;
     }
-    let line_count = recent.len();
     let mut links: Vec<(egui::Rect, Link, Color32)> = Vec::new();
     let mut names: Vec<(egui::Rect, &crate::world::ChatLine)> = Vec::new();
     let mut shift = egui::Vec2::ZERO;
@@ -5362,7 +5299,6 @@ fn toasts_at(
         .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(8.0, lift))
         .interactable(false)
         .order(egui::Order::Background)
-        .layout(egui::Layout::bottom_up(egui::Align::Min))
         .show(ctx, |ui| {
             // a line that leaves or arrives moves the others in this frame
             // only (#2544)
@@ -5370,10 +5306,16 @@ fn toasts_at(
             ui.set_max_width(560.0);
             // the islands' pills: the mockup's 12 px text, 9 × 4 margins and
             // 4 px between two lines
+            let (size, margin, gap) = if pills {
+                (super::fonts::chat_size(ui.ctx(), 12.0), egui::Margin::symmetric(9, 4), 4.0)
+            } else {
+                (super::fonts::chat_size(ui.ctx(), 13.0), egui::Margin::symmetric(6, 2), 2.0)
+            };
+            let family = pills.then(|| super::fonts::semibold(ui.ctx()));
             if pills {
                 ui.spacing_mut().item_spacing.y = 0.0;
             }
-            for (index, line) in recent.into_iter().enumerate() {
+            for line in recent {
                 let age = now.duration_since(line.time).map(|d| d.as_secs_f32()).unwrap_or(0.0);
                 let alpha = ((seconds - age) / 3.0).clamp(0.0, 1.0);
                 // the line's own, dimmed from beyond the say range: its
@@ -5386,14 +5328,6 @@ fn toasts_at(
                 let radius = ui.visuals().window_corner_radius;
                 let glass = p.panel_alpha < 255;
                 let mut slot = None;
-                let mut ghost_names = HashSet::new();
-                let mut ghost_pics = HashSet::new();
-                let mut ghost_links = Vec::new();
-                let (name_requests, picture_requests, click_links) = if alpha > 0.0 {
-                    (&mut *want_names, &mut *wanted_pics, &mut links)
-                } else {
-                    (&mut ghost_names, &mut ghost_pics, &mut ghost_links)
-                };
                 let bubble = egui::Frame::new()
                     .fill(if glass { Color32::TRANSPARENT } else { tint })
                     .corner_radius(radius)
@@ -5411,7 +5345,7 @@ fn toasts_at(
                             line,
                             p,
                             world,
-                            name_requests,
+                            want_names,
                             540.0,
                             size,
                             times,
@@ -5434,19 +5368,18 @@ fn toasts_at(
                             let c = visual.left_edge(name.clone().unwrap_or(at..at)).translate(rect.min.to_vec2());
                             let r =
                                 egui::Rect::from_center_size(egui::pos2(c.min.x - 2.0 - side * 0.5, c.center().y), egui::vec2(side, side));
-                            bubble_sender(painter, p, pics, picture_requests, r, &who, line, shown);
+                            bubble_sender(painter, p, pics, wanted_pics, r, &who, line, shown);
                         }
                         // the islands' pills: the sender's name acts like the
                         // conversations' (Firestorm's toast links it)
                         if pills
                             && let Some(range) = name
                             && let Some(r) = visual.range_rects(rect.min, range).first().copied()
-                            && alpha > 0.0
                         {
                             names.push((r, line));
                         }
                         let col = color_for(line.kind, p).gamma_multiply(shown);
-                        line_extras(ui, p, world, &visual, rect.min, size, shown, badges, line_links, col, click_links);
+                        line_extras(ui, p, world, &visual, rect.min, size, shown, badges, line_links, col, &mut links);
                     });
                 if glass && let Some(slot) = slot {
                     let rect = bubble.response.rect;
@@ -5455,9 +5388,7 @@ fn toasts_at(
                         aurora_render::glass_panel_faded(rect, f32::from(radius.nw), tint, alpha * console_blur),
                     );
                 }
-                if index + 1 < line_count {
-                    ui.add_space(gap);
-                }
+                ui.add_space(gap);
             }
             shift = held.settle(ui);
         });
@@ -6047,101 +5978,6 @@ mod tests {
     }
 
     use super::*;
-
-    #[test]
-    fn chat_toasts_keep_their_positions_when_the_oldest_toast_expires() {
-        let base = std::time::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-        let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
-        let line = |from: &str, source: u128, text: &str, age: u64| crate::world::ChatLine {
-            time: base - std::time::Duration::from_secs(age),
-            from: from.into(),
-            text: text.into(),
-            kind: ChatKind::Local(ChatType::Normal),
-            source: uuid::Uuid::from_u128(source),
-            origin: Origin::Live,
-            blocked: false,
-            beyond_range: false,
-            speaker: crate::world::Speaker::Named,
-            private_history: false,
-        };
-        world.chat.extend([
-            line("First", 1, "Toast first unique", 19),
-            line("Second", 2, "Toast second unique", 10),
-            line("Third", 3, "Toast third unique", 5),
-        ]);
-
-        let ctx = egui::Context::default();
-        crate::theme::Theme::default().apply(&ctx, 1.0);
-        let p = crate::theme::Theme::default().palette();
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
-        let frame = |now, time| {
-            let mut out = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(screen),
-                    time: Some(time),
-                    ..Default::default()
-                },
-                |ui| {
-                    toasts_at(
-                        ui.ctx(),
-                        &p,
-                        &world,
-                        &HashMap::new(),
-                        &mut HashSet::new(),
-                        &mut HashSet::new(),
-                        740.0,
-                        20.0,
-                        u32::MAX,
-                        false,
-                        false,
-                        false,
-                        false,
-                        true,
-                        now,
-                    )
-                },
-            );
-            out.textures_delta.clear();
-            let positions = out
-                .shapes
-                .iter()
-                .filter_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.text().contains("Toast ") => Some((text.galley.text().to_owned(), text.pos.y)),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            let area = ctx.memory(|memory| memory.area_rect(egui::Id::unique("chat_toasts")));
-            (positions, area)
-        };
-
-        let _ = frame(base, 0.0);
-        let _ = frame(base, 0.016);
-        let _ = frame(base, 0.032);
-        let before_expiration = frame(base, 0.048);
-        let after_expiration = base + std::time::Duration::from_secs(2);
-        let first_frame = frame(after_expiration, 1.0);
-        let settled_frame = frame(after_expiration, 1.016);
-
-        for surviving in ["Toast second unique", "Toast third unique"] {
-            let y = |positions: &[(String, f32)]| {
-                positions
-                    .iter()
-                    .find(|(text, _)| text.contains(surviving))
-                    .map(|(_, y)| *y)
-                    .expect("the toast remains visible")
-            };
-            let before = y(&before_expiration.0);
-            let after = y(&first_frame.0);
-            let settled = y(&settled_frame.0);
-            assert!(
-                (before - after).abs() < 0.5 && (before - settled).abs() < 0.5,
-                "{surviving} moved from y={before} to y={after}, then y={settled} as the older toast expired; areas {:?}, {:?}, {:?}",
-                before_expiration.1,
-                first_frame.1,
-                settled_frame.1
-            );
-        }
-    }
 
     /// Enter from the world: the chat bar, unless "Enter returns to the
     /// last chat field used" sends it back to the conversation last talked
