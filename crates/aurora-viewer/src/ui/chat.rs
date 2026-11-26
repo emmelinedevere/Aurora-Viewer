@@ -5186,16 +5186,6 @@ impl Held {
             .round_to_pixels(ui.pixels_per_point())
             .round_ui();
         let shift = egui::vec2(0.0, top - ui.max_rect().top());
-        eprintln!(
-            "settle room {} lift {} min {:?} max {:?} height {} top {} shift {}",
-            self.room,
-            self.lift,
-            ui.min_rect(),
-            ui.max_rect(),
-            ui.min_rect().height(),
-            top,
-            shift.y
-        );
         if shift.y != 0.0 {
             let moved = egui::emath::TSTransform::from_translation(shift);
             let layer = ui.layer_id();
