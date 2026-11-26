@@ -587,6 +587,7 @@ mod tests {
             blocked: false,
             beyond_range: false,
             speaker: Default::default(),
+            private_history: false,
         }
     }
 
@@ -741,6 +742,7 @@ mod tests {
             blocked: false,
             beyond_range: false,
             speaker: crate::world::Speaker::Named,
+            private_history: false,
         };
         world.chat.extend([
             line("First", 1, "Toast first unique", 19),
@@ -838,6 +840,7 @@ mod tests {
             blocked: false,
             beyond_range: false,
             speaker: crate::world::Speaker::Named,
+            private_history: false,
         };
         world.chat.extend([
             line("Nowalski", 1, "Toast question", base - std::time::Duration::from_secs(19)),

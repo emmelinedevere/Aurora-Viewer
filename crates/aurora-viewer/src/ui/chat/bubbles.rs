@@ -244,7 +244,14 @@ pub(super) fn draw(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::Ch
             let r = ui.add(
                 super::super::widgets::elided_label(
                     ui,
-                    emphasis.rich_text(ui.ctx(), &name, chat_size(ui.ctx(), 11.5), col).strong(),
+                    emphasis
+                        .rich_text(
+                            ui.ctx(),
+                            super::chat_header_name(world, line, &name),
+                            chat_size(ui.ctx(), 11.5),
+                            col,
+                        )
+                        .strong(),
                     max_bubble,
                 )
                 .sense(egui::Sense::click()),
@@ -457,6 +464,7 @@ mod tests {
             blocked: false,
             beyond_range: false,
             speaker: Default::default(),
+            private_history: false,
         };
         let day = 86_400;
         // yesterday's two lines, then today's
@@ -507,6 +515,7 @@ mod tests {
             blocked: false,
             beyond_range: false,
             speaker: Default::default(),
+            private_history: false,
         };
         let mut list_top = 0.0;
         let mut output = ctx.run_ui(
