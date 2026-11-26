@@ -8,9 +8,9 @@ use super::*;
 /// The main window's least size, in logical points (#2737): narrow enough
 /// for a third of a 1440–1512 point screen in macOS Split View, where the
 /// system will not drag a pane below the window's content minimum
-/// (`NSWindow.setContentMinSize`, set from `with_min_inner_size`). The
-/// Legacy Viewer sets no minimum by default (`MinWindowWidth` /
-/// `MinWindowHeight`, 0).
+/// (`NSWindow.setContentMinSize`, set from `with_min_inner_size`), and low
+/// enough for Windows and Linux too. The Legacy Viewer sets no minimum by
+/// default (`MinWindowWidth` / `MinWindowHeight`, 0).
 pub(super) const MIN_WINDOW_SIZE: (u32, u32) = (480, 320);
 
 /// How the main window opens.

@@ -589,7 +589,9 @@ pub(super) fn account_part(ui: &mut egui::Ui, p: &Palette, st: &StatusInfo, isla
         if money.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        menu::context_menu(&money, p, |ui| super::balance_menu(ui, p, st, action));
+        menu::context_menu(&money, p, |ui| {
+            super::balance_menu(ui, p, st, action, part == AccountPart::BothCompact)
+        });
         if money.on_hover_text(aurora_i18n::tr!("ui-bars-balance-click-to-buy-l")).clicked() {
             *action = BarAction::BuyCurrency;
         }
@@ -600,7 +602,7 @@ pub(super) fn account_part(ui: &mut egui::Ui, p: &Palette, st: &StatusInfo, isla
                 super::status_menu(ui, p, st.status, action);
                 crate::ui::toolbar::native_context::fallback(ui, p);
             } else {
-                super::balance_menu(ui, p, st, action);
+                super::balance_menu(ui, p, st, action, part == AccountPart::BothCompact);
             }
         });
     }
@@ -613,7 +615,9 @@ pub(super) fn account_part(ui: &mut egui::Ui, p: &Palette, st: &StatusInfo, isla
         let id = Id::unique("bars_account_demo_menu");
         let mut open = ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
         let at = Pos2::new(rect.left(), island.bottom() + MARGIN);
-        menu::popup_at(&ctx, id, at, &mut open, p, |ui| super::balance_menu(ui, p, st, action));
+        menu::popup_at(&ctx, id, at, &mut open, p, |ui| {
+            super::balance_menu(ui, p, st, action, part == AccountPart::BothCompact)
+        });
         ctx.data_mut(|d| d.insert_temp(id, open));
     }
     let Some(status) = status else { return };
